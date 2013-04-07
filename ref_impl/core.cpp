@@ -40,11 +40,14 @@ using namespace std;
 
 // Computes edit distance between a null-terminated string "a" with length "na"
 //  and a null-terminated string "b" with length "nb" 
-int EditDistance(const char* a, int na,const char* b, int nb)
+int EditDistance(const char* a, int na,const char* b, int nb, int k)
 {
 	int oo=0x7FFFFFFF;
 
-	 int T[2][MAX_WORD_LENGTH+1];
+	if(abs(na-nb)>k)
+		return oo;
+
+	int T[2][MAX_WORD_LENGTH+1];
 
 	int ia, ib;
 
@@ -98,13 +101,18 @@ int EditDistance(const char* a, int na,const char* b, int nb)
 
 // Computes Hamming distance between a null-terminated string "a" with length "na"
 //  and a null-terminated string "b" with length "nb" 
-unsigned int HammingDistance(const char* a, int na,const char* b, int nb)
+unsigned int HammingDistance(const char* a, int na,const char* b, int nb, int k)
 {
 	int j, oo=0x7FFFFFFF;
 	if(na!=nb) return oo;
 	
 	unsigned int num_mismatches=0;
-	for(j=0;j<na;j++) if(a[j]!=b[j]) num_mismatches++;
+	for(j=0;j<na;j++)
+		if(a[j]!=b[j]){ 
+			num_mismatches++;
+			if(num_mismatches > k)
+				return oo;
+		}
 	
 	return num_mismatches;
 }
@@ -154,7 +162,7 @@ vector<Document> docs;
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
 ErrorCode InitializeIndex(){
-	tPool = initThreadPool(1);
+	tPool = initThreadPool(2);
 	pthread_mutex_init(&lock, NULL);
 	return EC_SUCCESS;}
 
@@ -313,7 +321,7 @@ void MatchDocument2(DocID doc_id,char* doc_str)
 
 				for(unordered_map<string,DocID>::const_iterator d=doc_hash.begin();d!=doc_hash.end();++d){
 
-					unsigned int num_mismatches=HammingDistance(query_hash[j].tokens[i].c_str(), query_hash[j].tokens[i].size(), d->first.c_str(), d->first.size());
+					unsigned int num_mismatches=HammingDistance(query_hash[j].tokens[i].c_str(), query_hash[j].tokens[i].size(), d->first.c_str(), d->first.size(), query_hash[j].query.match_dist);
 
 					if(num_mismatches<=query_hash[j].query.match_dist){matched++;/*printf("Matched :%u %u %s %s\n",q->query.query_id,d->second,q->tokens[i].c_str(),d->first.c_str());*/break;}//query_ids.push_back(q->second.query_id);
 
@@ -339,7 +347,7 @@ void MatchDocument2(DocID doc_id,char* doc_str)
 
 				for(unordered_map<string,DocID>::const_iterator d=doc_hash.begin();d!=doc_hash.end();++d){
 
-					unsigned int edit_dist=EditDistance(query_hash[j].tokens[i].c_str(), query_hash[j].tokens[i].size(), d->first.c_str(), d->first.size());
+					unsigned int edit_dist=EditDistance(query_hash[j].tokens[i].c_str(), query_hash[j].tokens[i].size(), d->first.c_str(), d->first.size(), query_hash[j].query.match_dist);
 
 					if(edit_dist<=query_hash[j].query.match_dist) {matched++;/*printf("Matched :%u %u %s %s\n",q->query.query_id,d->second,q->tokens[i].c_str(),d->first.c_str());*/break;}//query_ids.push_back(q->second.query_id);
 
@@ -364,7 +372,10 @@ void MatchDocument2(DocID doc_id,char* doc_str)
 	doc.query_ids=0;
 	if(doc.num_res) doc.query_ids=(unsigned int*)malloc(doc.num_res*sizeof(unsigned int));
 	for(unsigned i=0;i<doc.num_res;i++){ doc.query_ids[i]=query_ids[i]; /*printf("%u ", query_ids[i]);*/}
+
+	pthread_mutex_lock(&lock);
 	docs.push_back(doc);
+	pthread_mutex_unlock(&lock);
 
 }
 
