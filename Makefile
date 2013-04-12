@@ -29,7 +29,7 @@
 
 # Build targets (your implementation targets should go in IMPL_O)
 TEST_O=test_driver/test.o 
-IMPL_O=ref_impl/core.o ref_impl/threadPool.o
+IMPL_O=ref_impl/core.o ref_impl/Job.o ref_impl/SafeJobQueue.o ref_impl/ThreadPool.o
 
 # Compiler flags
 CC  = gcc

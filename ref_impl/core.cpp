@@ -33,7 +33,7 @@
 #include <string.h>
 #include <unordered_map>
 #include <iostream>
-#include "threadPool.h"
+#include "../include/ThreadPool.h"
 using namespace std;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -146,7 +146,7 @@ struct Query_st{
 	vector <string>tokens;
 
 };
-threadPool *tPool;
+ThreadPool tPool(2);
 pthread_mutex_t lock;
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -162,13 +162,16 @@ vector<Document> docs;
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
 ErrorCode InitializeIndex(){
-	tPool = initThreadPool(2);
+	//tPool = initThreadPool(2);
 	pthread_mutex_init(&lock, NULL);
 	return EC_SUCCESS;}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
-ErrorCode DestroyIndex(){return EC_SUCCESS;}
+ErrorCode DestroyIndex(){
+	tPool.destroy();
+	return EC_SUCCESS;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -256,7 +259,9 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str){
 	}
 	/////////
 
-	addWork(tPool, MatchDocument2,doc_id, icy);
+	MatchJob * job = new MatchJob(MatchDocument2, doc_id, icy);
+	//addWork(tPool, MatchDocument2,doc_id, icy);
+	tPool.addJob(job);
 
 	return EC_SUCCESS;
 }
@@ -386,7 +391,8 @@ ErrorCode GetNextAvailRes(DocID* p_doc_id, unsigned int* p_num_res, QueryID** p_
 	// Get the first undeliverd resuilt from "docs" and return it
 	//destroyPool(tPool);//this is wait for now
 	unsigned int size=docs.size();
-	destroyPool(tPool);
+	//destroyPool(tPool);
+	tPool.barrierAll(MATCH);
 	*p_doc_id=0; *p_num_res=0; *p_query_ids=0;
 	if(docs.size()==0) return EC_NO_AVAIL_RES;
 	*p_doc_id=docs[0].doc_id; *p_num_res=docs[0].num_res; *p_query_ids=docs[0].query_ids;
