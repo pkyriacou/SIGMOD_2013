@@ -63,7 +63,6 @@ class GetNextJob : public Job{
 class StartQueryJob : public Job{
 
 	public:
-
 	void (*funcPtr) (QueryID query_id, char* query_str, MatchType match_type, unsigned int match_dist);
 	QueryID query_id;
 	char* query_str;
@@ -77,6 +76,7 @@ class StartQueryJob : public Job{
 			unsigned int match_dist) :	Job(START),
 							funcPtr(funcPtr),
 							query_id(query_id),
+							query_str(query_str),
 							match_type(match_type),
 							match_dist(match_dist)
 							{};

@@ -32,6 +32,7 @@
 #include <vector>
 #include <string.h>
 #include <unordered_map>
+#include <algorithm>
 #include <iostream>
 #include "../include/ThreadPool.h"
 using namespace std;
@@ -101,7 +102,7 @@ int EditDistance(const char* a, int na,const char* b, int nb, int k)
 
 // Computes Hamming distance between a null-terminated string "a" with length "na"
 //  and a null-terminated string "b" with length "nb" 
-unsigned int HammingDistance(const char* a, int na,const char* b, int nb, int k)
+unsigned int HammingDistance(const char* a, int na,const char* b, int nb, unsigned int k)
 {
 	int j, oo=0x7FFFFFFF;
 	if(na!=nb) return oo;
@@ -148,6 +149,9 @@ struct Query_st{
 };
 ThreadPool tPool(2);
 pthread_mutex_t lock;
+pthread_mutex_t startQueryLock;
+//pthread_mutex_t querySort;
+//bool sortQueries;
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
 // Keeps all currently active queries
@@ -162,7 +166,9 @@ vector<Document> docs;
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
 ErrorCode InitializeIndex(){
-	//tPool = initThreadPool(2);
+	//sortQueries = false;
+	//pthread_mutex_init(&startQueryLock, NULL);
+	//pthread_mutex_init(&querySort, NULL);
 	pthread_mutex_init(&lock, NULL);
 	return EC_SUCCESS;}
 
@@ -177,6 +183,17 @@ ErrorCode DestroyIndex(){
 
 ErrorCode StartQuery(QueryID query_id, const char* query_str, MatchType match_type, unsigned int match_dist)
 {
+	// Uncomment to enable parallelism.
+	/*
+	sortQueries = true;	// We have to sort the queries when we next run matchdocument.
+	char *icy = (char*)malloc(sizeof(char) * strlen(query_str)+1);
+	strcpy(icy, query_str);
+	
+	StartQueryJob * job = new StartQueryJob(StartQuery2, query_id, icy, match_type, match_dist);
+	tPool.addJob(job);
+	*/
+
+	// Comment to disable serial execution.
 	Query query;
 	query.query_id=query_id;
 	//printf("%u\n",query_id);
@@ -187,28 +204,41 @@ ErrorCode StartQuery(QueryID query_id, const char* query_str, MatchType match_ty
 	query.valid=true;
 	// Add this query to the active query set
 	queries.push_back(query);
+
+
 	return EC_SUCCESS;
+}
+
+void StartQuery2(QueryID query_id, char* query_str, MatchType match_type, unsigned int match_dist)
+{
+	Query query;
+
+	query.query_id=query_id;
+	strcpy(query.str, query_str);
+	query.match_type=match_type;
+	query.match_dist=match_dist;
+	query.valid=true;
+
+	// Add this query to the active query set
+	pthread_mutex_lock(&startQueryLock);
+		queries.push_back(query);
+	pthread_mutex_unlock(&startQueryLock);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
 ErrorCode EndQuery(QueryID query_id)
 {
-	//destroyPool(tPool);
 	// Remove this query from the active query set
 	unsigned int i, n=queries.size();
-	//vector<Query>::const_iterator q;
-	//q=queries.begin();
+
 	for(i=0;i<n;i++)
 	{
 
 		if(queries[i].query_id==query_id)
 		{
-			//printf("%u \n",queries.size());
-			//queries.erase(queries.begin()+i);
 			queries[i].valid=false;
 			query_hash[i].query.valid=false;
-			//printf("2  %u \n",queries.size());
 			break;
 		}
 	}
@@ -216,170 +246,149 @@ ErrorCode EndQuery(QueryID query_id)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
+bool queryCompare(Query a, Query b) { return a.query_id < b.query_id; }
+///////////////////////////////////////////////////////////////////////////////////////////////
 ErrorCode MatchDocument(DocID doc_id, const char* doc_str){
-	//static int times=0;
+
+	// Uncomment if you're parallelising start query.
+	/*tPool.barrierAll(START);
+	pthread_mutex_lock(&querySort);
+	if(sortQueries){
+		sortQueries = false;
+		sort(queries.begin(), queries.end(), queryCompare);
+	}
+	pthread_mutex_unlock(&querySort);*/
+
 	static int n=0;
-	char * ph;
-	char doc_str1[MAX_DOC_LENGTH];
-	strcpy(doc_str1, doc_str);
 
 	char *icy = (char*)malloc(sizeof(char) * MAX_DOC_LENGTH);
 	strcpy(icy, doc_str);
-	/////////
-
 
 	int n1=queries.size();
 
 	if(n!=n1){
-		//printf("times\n");
-		//n++;
-		//printf("N:%d N1:%d\n",n,n1);
+
 		for(int i=n;i<n1;i++){
 			Query_st x;
+
 			x.query=queries[i];
-			//printf("ID:%u \n",queries[i].query_id);
-			ph=strtok(queries[i].str," ");
-			while(ph!=NULL){
-				//printf("%s\n",ph);
-				//char *temp=(char *)malloc(sizeof(char)*MAX_DOC_LENGTH);
-				//strcpy(temp,ph);
-				//char temp[MAX_DOC_LENGTH];
-				//strcpy(temp,ph);
-				if(ph){
 
+			for(char *ph = strtok(queries[i].str," "); ph != NULL; ph=strtok(NULL," "))
+				x.tokens.push_back(ph);
 
-					x.tokens.push_back(ph);
-
-				}
-				ph=strtok(NULL," ");
-			}
 			query_hash.push_back(x);
 			n=n1;
 		}
 	}
-	/////////
 
 	MatchJob * job = new MatchJob(MatchDocument2, doc_id, icy);
-	//addWork(tPool, MatchDocument2,doc_id, icy);
 	tPool.addJob(job);
 
 	return EC_SUCCESS;
 }
+
 void MatchDocument2(DocID doc_id,char* doc_str)
 {
-
 	char cur_doc_str [MAX_DOC_LENGTH];
 	char *tok;
 	strcpy(cur_doc_str, doc_str);
 	unsigned int matched=0;
 	unordered_map<string,DocID>doc_hash;
 
-	unordered_map<string,DocID>::const_iterator got;
+	unordered_map<string,DocID>::const_iterator got, d;
 
-	char *ph=strtok_r(cur_doc_str," ", &tok);
-
-	while(ph!=NULL){
-
-		ph=strtok_r(NULL," ", &tok);
-
-		if(ph)
-			doc_hash.insert({ph,doc_id});
-	}
+	// Tokenize string.
+	for(char *ph = strtok_r(cur_doc_str," ", &tok); ph != NULL; ph=strtok_r(NULL," ", &tok))
+		doc_hash.insert({ph,doc_id});
 
 	vector<unsigned int> query_ids;
 
+
 	for(unsigned int j=0;j<query_hash.size();++j){
 
-		if(query_hash[j].query.match_type==MT_EXACT_MATCH)
-		{
+		if(query_hash[j].query.valid && query_hash[j].query.match_type==MT_EXACT_MATCH){
 
-
-			for(unsigned int i=0;i<query_hash[j].tokens.size();i++){
-
+			unsigned int i;
+			for(i=0;i<query_hash[j].tokens.size();++i){
 				got=doc_hash.find(query_hash[j].tokens[i]);
 
-				if(got!=doc_hash.end()){
-						++matched;
-
-				}else{
-						--matched;
-
-				}
-
+				// If a query token does not match with at least one document token, this query is not valid for this document.
+				if(got==doc_hash.end())
+					break;
 			}
 
-			if(matched==query_hash[j].tokens.size()&& query_hash[j].query.valid){
+			// If all tokens of the current query were matched to this document, this query is valid for this document.
+			if(i == query_hash[j].tokens.size())
 				query_ids.push_back(query_hash[j].query.query_id);
-				matched=0;
-
-			}else{
-
-				matched=0;
-			}
-
-
 		}
-		else if(query_hash[j].query.match_type==MT_HAMMING_DIST)
-		{
 
-			for(unsigned int i=0;i<query_hash[j].tokens.size();i++){
+		else if(query_hash[j].query.valid && query_hash[j].query.match_type==MT_HAMMING_DIST){
 
-				for(unordered_map<string,DocID>::const_iterator d=doc_hash.begin();d!=doc_hash.end();++d){
+			matched=0;
+			for(unsigned int i=0;i<query_hash[j].tokens.size();++i){
+
+				//unordered_map<string,DocID>::const_iterator d;	<--- Moved to top of function.
+				for(d=doc_hash.begin(); d!=doc_hash.end(); ++d){
 
 					unsigned int num_mismatches=HammingDistance(query_hash[j].tokens[i].c_str(), query_hash[j].tokens[i].size(), d->first.c_str(), d->first.size(), query_hash[j].query.match_dist);
 
-					if(num_mismatches<=query_hash[j].query.match_dist){matched++;/*printf("Matched :%u %u %s %s\n",q->query.query_id,d->second,q->tokens[i].c_str(),d->first.c_str());*/break;}//query_ids.push_back(q->second.query_id);
-
+					// If this query token matches with at least ONE document token, this query token is valid for this document.
+					if(num_mismatches<=query_hash[j].query.match_dist){
+						matched++;
+						break;
+					}
 				}
 
+				// If this query token did not match with any document tokens, this query is not valid for this document.
+				if(d==doc_hash.end())
+					break;
 			}
-				if(matched>=query_hash[j].tokens.size()&& query_hash[j].query.valid){
-									query_ids.push_back(query_hash[j].query.query_id);
-									matched=0;
+			// If all tokens of the current query were matched to this document, this query is valid for this document.
+			if(matched==query_hash[j].tokens.size())
+				query_ids.push_back(query_hash[j].query.query_id);
 
-							}else{
-
-									matched=0;
-								}
-
-
-			}
-
-		else if(query_hash[j].query.match_type==MT_EDIT_DIST)
+		}
+		else if(query_hash[j].query.valid && query_hash[j].query.match_type==MT_EDIT_DIST)
 		{
-
+			matched=0;
 			for(unsigned int i=0;i<query_hash[j].tokens.size();i++){
-
-				for(unordered_map<string,DocID>::const_iterator d=doc_hash.begin();d!=doc_hash.end();++d){
+				//unordered_map<string,DocID>::const_iterator d;	<--- Moved to top of function.
+				for(d=doc_hash.begin(); d!=doc_hash.end(); ++d){
 
 					unsigned int edit_dist=EditDistance(query_hash[j].tokens[i].c_str(), query_hash[j].tokens[i].size(), d->first.c_str(), d->first.size(), query_hash[j].query.match_dist);
 
-					if(edit_dist<=query_hash[j].query.match_dist) {matched++;/*printf("Matched :%u %u %s %s\n",q->query.query_id,d->second,q->tokens[i].c_str(),d->first.c_str());*/break;}//query_ids.push_back(q->second.query_id);
+					// If this query token matches with at least ONE document token, this query token is valid for this document.
+					if(edit_dist<=query_hash[j].query.match_dist) {
+						matched++;
+						break;
+					}
 
 				}
-
+				// If this query token did not match with any document tokens, this query is not valid for this document.
+				if(d==doc_hash.end())
+					break;
 			}
-			if(matched>=query_hash[j].tokens.size()&& query_hash[j].query.valid){
+			
+			// If all tokens of the current query were matched to this document, this query is valid for this document.
+			if(matched==query_hash[j].tokens.size())
 					query_ids.push_back(query_hash[j].query.query_id);
-					matched=0;
 
-			}else{
-
-					matched=0;
-				}
 		}
 	}
 
 
+	if(query_ids.size() == 0)
+		return;
+
 	Document doc;
-	doc.doc_id=doc_id;
-	doc.num_res=query_ids.size();
-	doc.query_ids=0;
-	if(doc.num_res) doc.query_ids=(unsigned int*)malloc(doc.num_res*sizeof(unsigned int));
-	for(unsigned i=0;i<doc.num_res;i++){ doc.query_ids[i]=query_ids[i]; /*printf("%u ", query_ids[i]);*/}
+	doc.doc_id = doc_id;
+	doc.num_res = query_ids.size();
+	doc.query_ids = (QueryID *) malloc(doc.num_res*sizeof(QueryID));
+	for(unsigned i=0; i<doc.num_res; ++i)
+		doc.query_ids[i]=query_ids[i];
 
 	pthread_mutex_lock(&lock);
-	docs.push_back(doc);
+		docs.push_back(doc);
 	pthread_mutex_unlock(&lock);
 
 }
@@ -388,15 +397,24 @@ void MatchDocument2(DocID doc_id,char* doc_str)
 //bool comp(const Document &d1,const Document &d2){return d1.doc_id<d2.doc_id;}
 ErrorCode GetNextAvailRes(DocID* p_doc_id, unsigned int* p_num_res, QueryID** p_query_ids)
 {
-	// Get the first undeliverd resuilt from "docs" and return it
-	//destroyPool(tPool);//this is wait for now
-	unsigned int size=docs.size();
-	//destroyPool(tPool);
-	tPool.barrierAll(MATCH);
-	*p_doc_id=0; *p_num_res=0; *p_query_ids=0;
+	
+	tPool.barrierNext(MATCH);
+	
+	*p_doc_id=0; 
+	*p_num_res=0; 
+	*p_query_ids=0;
+
 	if(docs.size()==0) return EC_NO_AVAIL_RES;
-	*p_doc_id=docs[0].doc_id; *p_num_res=docs[0].num_res; *p_query_ids=docs[0].query_ids;
-	docs.erase(docs.begin());
+
+	// Get the first undeliverd result from "docs" and return it
+	*p_doc_id=docs[0].doc_id; 
+	*p_num_res=docs[0].num_res; 
+	*p_query_ids=docs[0].query_ids;
+
+	pthread_mutex_lock(&lock);
+		docs.erase(docs.begin());
+	pthread_mutex_unlock(&lock);
+
 	return EC_SUCCESS;
 }
 

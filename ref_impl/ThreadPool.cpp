@@ -130,8 +130,8 @@ void ThreadPool::barrierNext(JobType type){
 	pthread_mutex_lock(&jobWaitMutex[type]);
 
 	unsigned int temp = waitingJobs[type];
-
-	while(temp == waitingJobs[type])
+	
+	while(waitingJobs[type] && temp == waitingJobs[type])
 		pthread_cond_wait(&jobDone[type], &jobWaitMutex[type]);
 
 	pthread_mutex_unlock(&jobWaitMutex[type]);
@@ -155,7 +155,6 @@ void ThreadPool::destroy(){
 		pthread_cond_broadcast(&workAvailable);
 	else{
 		// Wait until all threads have finished executing.
-		// IS THIS NECESSARY?
 		pthread_mutex_lock(&exitMutex);
 			while(jobQueue.safeSize())
 				pthread_cond_wait(&finishedJob, &exitMutex);
@@ -163,7 +162,6 @@ void ThreadPool::destroy(){
 	}	
 
 	// Join until all threads have finished. 
-	// IS THIS NECESSARY?
 	for(unsigned int i = 0; i < size; ++i)
 		pthread_join(threads[i], NULL);
 

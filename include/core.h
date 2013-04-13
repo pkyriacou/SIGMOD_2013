@@ -165,6 +165,10 @@ ErrorCode StartQuery(QueryID        query_id,
                      MatchType      match_type,
                      unsigned int   match_dist);
 
+void StartQuery2 (	QueryID		query_id, 
+			char*		query_str,
+			MatchType 	match_type, 
+			unsigned int 	match_dist);
 /**
 * Remove a query from the active query set.
 *
@@ -200,7 +204,7 @@ ErrorCode EndQuery(QueryID query_id);
 *          if the document was added successfully
 */
 
-void  MatchDocument2(DocID         doc_id,
+void MatchDocument2(DocID         doc_id,
                         char*   doc_str);
 ErrorCode MatchDocument(DocID         doc_id,
                         const char*   doc_str);

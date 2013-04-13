@@ -34,7 +34,7 @@ IMPL_O=ref_impl/core.o ref_impl/Job.o ref_impl/SafeJobQueue.o ref_impl/ThreadPoo
 # Compiler flags
 CC  = gcc
 CXX = g++
-CFLAGS=-O3 -fPIC -Wall -I. -I./include -g -std=c++0x
+CFLAGS=-O3 -fPIC -Wall -I. -I./include -std=c++0x -g
 CXXFLAGS=$(CFLAGS)
 LDFLAGS=-lpthread
 
